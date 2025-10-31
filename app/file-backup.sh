@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-timestamp() { date +"%Y%m%d-%H%M%S"; }
+timestamp() { date +"%Y%m%d"; }
 log() { echo "[$(date -Iseconds)] $*"; }
 
 DEST="${BACKUP_DEST:-/backups}"
@@ -44,7 +44,8 @@ sed -i -e 's/\r$//' -e '/^\s*#/d' -e '/^\s*$/d' "$EXC_FILE" || true
 EXT="tar"
 TAR_OPTS=(--create --absolute-names --xattrs --xattrs-include='*' --acls --numeric-owner --warning=no-file-changed)
 [ "$ONEFS" = "true" ] && TAR_OPTS+=(--one-file-system)
-TAR_OPTS+=(--files-from="$SRC_FILE" --exclude-from="$EXC_FILE")
+TAR_OPTS+=(--exclude-from="$EXC_FILE" --files-from="$SRC_FILE")
+
 
 case "$FORMAT" in
   tar.gz)  EXT="tar.gz";  TAR_OPTS+=(--gzip) ;;

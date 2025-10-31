@@ -1,0 +1,8 @@
+# SHELL and PATH keep things predictable
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# m h dom mon dow  user    command
+# Run at 02:00 as 'backup'; send output to container stdout so it shows in `docker logs`
+0 2 * * * backup /usr/local/bin/file-backup >> /proc/1/fd/1 2>&1
+

@@ -1,12 +1,14 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 timestamp() { date +"%Y%m%d"; }
 log() { echo "[$(date -Iseconds)] $*"; }
 
 DEST="${BACKUP_DEST:-/backups}"
 FORMAT="${BACKUP_FORMAT:-tar.gz}"
-PREFIX="${BACKUP_NAME_PREFIX:-$(hostname -s)}"
+HN="$(hostname 2>/dev/null || echo container)"
+HN="${HN%%.*}"
+PREFIX="${BACKUP_NAME_PREFIX:-$HN}"
 ONEFS="${BACKUP_ONEFS:-false}"
 
 mkdir -p "$DEST"
@@ -16,42 +18,50 @@ SRC_FILE="$TMPDIR/sources.txt"
 EXC_FILE="$TMPDIR/excludes.txt"
 trap 'rm -rf "$TMPDIR"' EXIT
 
-# Resolve sources
+# Sources
 if [ -f /config/sources.txt ]; then
   cp /config/sources.txt "$SRC_FILE"
 elif [ -n "${BACKUP_SOURCES:-}" ]; then
-  # allow comma or newline separated
-  printf "%s\n" "${BACKUP_SOURCES//,/\\n}" > "$SRC_FILE"
+  printf "%s" "$BACKUP_SOURCES" | tr ',' '\n' > "$SRC_FILE"
 else
   log "ERROR: No sources defined. Provide /config/sources.txt or BACKUP_SOURCES."
   exit 1
 fi
 
-# Resolve excludes
+# Excludes
 if [ -f /config/excludes.txt ]; then
   cp /config/excludes.txt "$EXC_FILE"
 elif [ -n "${BACKUP_EXCLUDES:-}" ]; then
-  printf "%s\n" "${BACKUP_EXCLUDES//,/\\n}" > "$EXC_FILE"
+  printf "%s" "$BACKUP_EXCLUDES" | tr ',' '\n' > "$EXC_FILE"
 else
   : > "$EXC_FILE"
 fi
 
-# Clean up comments/blank lines and CRLFs
-sed -i -e 's/\r$//' -e '/^\s*#/d' -e '/^\s*$/d' "$SRC_FILE" || true
-sed -i -e 's/\r$//' -e '/^\s*#/d' -e '/^\s*$/d' "$EXC_FILE" || true
+# Clean up comments / blanks / CRLFs
+sed -i -e 's/\r$//' -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$SRC_FILE" || true
+sed -i -e 's/\r$//' -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$EXC_FILE" || true
 
-# Build tar options
+# Build tar arguments
+set -- \
+  --create \
+  --absolute-names \
+  --xattrs --xattrs-include='*' \
+  --acls \
+  --numeric-owner \
+  --warning=no-file-changed
+
+if [ "$ONEFS" = "true" ]; then
+  set -- "$@" --one-file-system
+fi
+
+# Exclude must come before file list
+set -- "$@" --exclude-from="$EXC_FILE" --files-from="$SRC_FILE"
+
 EXT="tar"
-TAR_OPTS=(--create --absolute-names --xattrs --xattrs-include='*' --acls --numeric-owner --warning=no-file-changed)
-[ "$ONEFS" = "true" ] && TAR_OPTS+=(--one-file-system)
-
-# IMPORTANT: exclude before files (so it actually applies)
-TAR_OPTS+=(--exclude-from="$EXC_FILE" --files-from="$SRC_FILE")
-
 case "$FORMAT" in
-  tar.gz)  EXT="tar.gz";  TAR_OPTS+=(--gzip) ;;
-  tar.zst) EXT="tar.zst"; TAR_OPTS+=(--use-compress-program=zstd) ;;
-  tar.bz2) EXT="tar.bz2"; TAR_OPTS+=(--bzip2) ;;
+  tar.gz)  EXT="tar.gz";  set -- "$@" --gzip ;;
+  tar.zst) EXT="tar.zst"; set -- "$@" --use-compress-program=zstd ;;
+  tar.bz2) EXT="tar.bz2"; set -- "$@" --bzip2 ;;
   tar)     EXT="tar" ;;
   *) log "ERROR: Unsupported BACKUP_FORMAT: $FORMAT"; exit 1 ;;
 esac
@@ -61,17 +71,25 @@ OUT_BASENAME="${PREFIX}-${STAMP}.${EXT}"
 OUT_PATH="${DEST}/${OUT_BASENAME}"
 
 log "Starting backup → ${OUT_PATH}"
-tar "${TAR_OPTS[@]}" --file "$OUT_PATH"
+tar "$@" --file "$OUT_PATH"
 
-# Checksum (best-effort)
+# Create checksum
 if command -v sha256sum >/dev/null 2>&1; then
   (cd "$DEST" && sha256sum "$OUT_BASENAME" > "${OUT_BASENAME}.sha256") || true
 fi
 
-# Optional ownership
-if [ -n "${BACKUP_UID:-}" ] || [ -n "${BACKUP_GID:-}" ]; then
-  chown "${BACKUP_UID:-0}:${BACKUP_GID:-0}" "$OUT_PATH" "${OUT_PATH}.sha256" 2>/dev/null || true
+# Apply ownership / permissions
+if [ -n "${BACKUP_CHOWN:-}" ]; then
+  log "Setting ownership to ${BACKUP_CHOWN}"
+  chown "${BACKUP_CHOWN}" "$OUT_PATH" 2>/dev/null || true
+  [ -f "${OUT_PATH}.sha256" ] && chown "${BACKUP_CHOWN}" "${OUT_PATH}.sha256" 2>/dev/null || true
 fi
 
-SIZE=$(du -h "$OUT_PATH" | awk '{print $1}')
+if [ -n "${BACKUP_CHMOD:-}" ]; then
+  log "Setting permissions to ${BACKUP_CHMOD}"
+  chmod "${BACKUP_CHMOD}" "$OUT_PATH" 2>/dev/null || true
+  [ -f "${OUT_PATH}.sha256" ] && chmod "${BACKUP_CHMOD}" "${OUT_PATH}.sha256" 2>/dev/null || true
+fi
+
+SIZE="$(du -h "$OUT_PATH" | awk '{print $1}')"
 log "Backup complete (${SIZE})"

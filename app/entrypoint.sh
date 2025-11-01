@@ -1,19 +1,21 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
-# Apply timezone if provided
+# Apply timezone
 if [ -n "${TZ:-}" ]; then
-  ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime || true
-  echo "$TZ" > /etc/timezone || true
+  if [ -e "/usr/share/zoneinfo/$TZ" ]; then
+    ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime || true
+    echo "$TZ" > /etc/timezone || true
+  fi
 fi
 
-# Run once and exit (useful for manual or Kubernetes CronJob)
+# One-shot mode (explicit)
 if [ "${RUN_ONCE:-false}" = "true" ]; then
   echo "[entrypoint] Running single backup..."
   exec /usr/local/bin/file-backup
-  exit 0
 fi
 
-# Otherwise, start cron in foreground mode
-echo "[entrypoint] Starting crond..."
-exec /usr/bin/crond -f -l 2
+# Default: run cron in foreground
+CROND_BIN="$(command -v crond)"
+echo "[entrypoint] Starting crond ($CROND_BIN)…"
+exec "$CROND_BIN" -f -l 2

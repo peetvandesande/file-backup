@@ -1,8 +1,8 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 if [ $# -lt 1 ]; then
-  echo "Usage: file-restore /backups/prefix-YYYYmmdd.tar[.gz|.bz2|.zst] [DEST_DIR]"
+  echo "Usage: file-restore /backups/prefix-YYYYmmdd.tar[.gz|.bz2|.zst] [DEST_DIR]" >&2
   exit 1
 fi
 
@@ -15,6 +15,6 @@ case "$ARCHIVE" in
   *.tar.bz2) tar -xjp -f "$ARCHIVE" -C "$DEST" ;;
   *.tar.zst) tar --use-compress-program=zstd -xp -f "$ARCHIVE" -C "$DEST" ;;
   *.tar)     tar -xp -f "$ARCHIVE" -C "$DEST" ;;
-  *) echo "Unsupported archive type: $ARCHIVE"; exit 1 ;;
+  *) echo "Unsupported archive type: $ARCHIVE" >&2; exit 1 ;;
 esac
 echo "[restore] Done."

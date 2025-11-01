@@ -1,21 +1,17 @@
 FROM alpine:3
 
 RUN apk add --no-cache \
-      coreutils dcron gzip tar tzdata zstd
+      coreutils dcron gzip tar zstd
 
-# Copy scripts from repo root 'app/'
+# Copy scripts from repo root 'app/' and make them executable
 COPY --chmod=0755 app/entrypoint.sh /entrypoint.sh
-COPY --chmod=0755 app/file-backup.sh /usr/local/bin/file-backup
-COPY --chmod=0755 app/file-restore.sh /usr/local/bin/file-restore
+COPY --chmod=0755 app/backup.sh /usr/local/bin/backup
+COPY --chmod=0755 app/restore.sh /usr/local/bin/restore
 
 # Install cron job
 COPY --chmod=0644 alpine/crontab /etc/crontabs/root
 
-VOLUME ["/backups", "/config"]
+VOLUME [ "/backups", "/config" ]
 
-ENV BACKUP_DEST=/backups \
-    BACKUP_FORMAT=tar.gz \
-    TZ=UTC
-
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT [ "/entrypoint.sh" ]
 

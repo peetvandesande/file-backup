@@ -1,7 +1,7 @@
 FROM alpine:3
 
 RUN apk add --no-cache \
-      bash ca-certificates coreutils dcron findutils gzip shadow tar tzdata zstd
+      coreutils dcron gzip tar tzdata zstd
 
 # Copy scripts from repo root 'app/'
 COPY --chmod=0755 app/entrypoint.sh /entrypoint.sh
@@ -15,7 +15,6 @@ VOLUME ["/backups", "/config"]
 
 ENV BACKUP_DEST=/backups \
     BACKUP_FORMAT=tar.gz \
-    RUN_ONCE=false \
     TZ=UTC
 
 ENTRYPOINT ["/entrypoint.sh"]

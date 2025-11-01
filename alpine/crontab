@@ -1,5 +1,7 @@
 # alpine/crontab
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-30 2 * * * /usr/local/bin/file-backup >> /proc/1/fd/1 2>&1
+
+# Run backup every day at 02:30 and send output to stdout of PID 1
+30 2 * * * /usr/local/bin/backup >> /proc/1/fd/1 2>&1
 

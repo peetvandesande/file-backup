@@ -1,9 +1,9 @@
 FROM alpine:3
 
 RUN apk add --no-cache \
-      bash ca-certificates coreutils dcron findutils gzip shadow tar tzdata zstd \
-  && addgroup -S backup && adduser -S -G backup backup
+      bash ca-certificates coreutils dcron findutils gzip shadow tar tzdata zstd
 
+# Copy scripts from repo root 'app/'
 COPY --chmod=0755 app/entrypoint.sh /entrypoint.sh
 COPY --chmod=0755 app/file-backup.sh /usr/local/bin/file-backup
 COPY --chmod=0755 app/file-restore.sh /usr/local/bin/file-restore

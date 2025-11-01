@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [ $# -lt 1 ]; then
-  echo "Usage: file-restore /backups/prefix-YYYYmmdd-HHMMSS.tar[.gz|.bz2|.zst] [DEST_DIR]"
+  echo "Usage: file-restore /backups/prefix-YYYYmmdd.tar[.gz|.bz2|.zst] [DEST_DIR]"
   exit 1
 fi
 
@@ -18,4 +18,3 @@ case "$ARCHIVE" in
   *) echo "Unsupported archive type: $ARCHIVE"; exit 1 ;;
 esac
 echo "[restore] Done."
-

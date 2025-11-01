@@ -44,8 +44,9 @@ sed -i -e 's/\r$//' -e '/^\s*#/d' -e '/^\s*$/d' "$EXC_FILE" || true
 EXT="tar"
 TAR_OPTS=(--create --absolute-names --xattrs --xattrs-include='*' --acls --numeric-owner --warning=no-file-changed)
 [ "$ONEFS" = "true" ] && TAR_OPTS+=(--one-file-system)
-TAR_OPTS+=(--exclude-from="$EXC_FILE" --files-from="$SRC_FILE")
 
+# IMPORTANT: exclude before files (so it actually applies)
+TAR_OPTS+=(--exclude-from="$EXC_FILE" --files-from="$SRC_FILE")
 
 case "$FORMAT" in
   tar.gz)  EXT="tar.gz";  TAR_OPTS+=(--gzip) ;;
@@ -74,4 +75,3 @@ fi
 
 SIZE=$(du -h "$OUT_PATH" | awk '{print $1}')
 log "Backup complete (${SIZE})"
-

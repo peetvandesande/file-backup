@@ -4,6 +4,14 @@ set -eu
 # Simple logger with ISO timestamp
 log() { printf "%s %s\n" "$(date -Is)" "$*" ; }
 
+# Trim leading/trailing single/double quotes
+_normalize() {
+  v="$1"
+  v="${v#\'}"; v="${v%\' }"; v="${v%\' }"; v="${v%\' }"
+  v="${v%\' }"; v="${v#\"}"; v="${v%\"}"
+  printf '%s' "$v"
+}
+
 # Required
 
 # Optional
@@ -17,6 +25,8 @@ CHOWN_TARGET="${BACKUP_CHOWN:-}"
 CHMOD_TARGET="${BACKUP_CHMOD:-}"
 
 # Deduct and sanitise values
+CHOWN_TARGET="$(_normalize "$CHOWN_TARGET")"
+CHMOD_TARGET="$(_normalize "$CHMOD_TARGET")"
 case "$CHOWN_TARGET" in
   *[!A-Za-z0-9:._-]* ) log "WARN: ignoring unsafe BACKUP_CHOWN='$CHOWN_TARGET'"; CHOWN_TARGET="";;
 esac
@@ -89,13 +99,19 @@ log "Checksum written: ${OUT_PATH}.sha256"
 
 # Apply ownership / permissions
 if [ -n "${CHOWN_TARGET}" ]; then
-  log "Setting ownership to ${CHOWN_TARGET}"
-  chown -h "${CHOWN_TARGET}" "${OUT_PATH}" "${OUT_PATH}.sha256" 2>/dev/null || true
+  if chown -h "${CHOWN_TARGET}" "${OUT_PATH}" "${OUT_PATH}.sha256" 2>/dev/null; then
+    log "Set ownership to ${CHOWN_TARGET}"
+  else
+    log "WARNING: Failed to set ownership to ${CHOWN_TARGET}"
+  fi
 fi
 
 if [ -n "${CHMOD_TARGET}" ]; then
-  log "Setting permissions to ${CHMOD_TARGET}"
-  chmod "${CHMOD_TARGET}" "${OUT_PATH}" "${OUT_PATH}.sha256" 2>/dev/null || true
+  if chmod "${CHMOD_TARGET}" "${OUT_PATH}" "${OUT_PATH}.sha256" 2>/dev/null; then
+    log "Set permissions to ${CHMOD_TARGET}"
+  else
+    log "WARNING: Failed to set permissions to ${CHMOD_TARGET}"
+  fi
 fi
 
 SIZE="$(du -h "$OUT_PATH" | awk '{print $1}')"

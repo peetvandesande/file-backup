@@ -1,15 +1,15 @@
 FROM alpine:3
 
 RUN apk add --no-cache \
-      coreutils dcron gzip tar zstd
+      coreutils gzip tar zstd \
+ && mkdir -p /etc/crontabs \
+ && echo '30	10	*	*	*	/usr/local/bin/backup >> /proc/1/fd/1 2>&1' >> /etc/crontabs/root \
+ && chmod 600 /etc/crontabs/root
 
 # Copy scripts from repo root 'app/' and make them executable
 COPY --chmod=0755 app/entrypoint.sh /entrypoint.sh
-COPY --chmod=0755 app/backup.sh /usr/local/bin/backup
-COPY --chmod=0755 app/restore.sh /usr/local/bin/restore
-
-# Install cron job
-COPY --chmod=0644 alpine/crontab /etc/crontabs/root
+COPY --chmod=0755 app/backup.sh     /usr/local/bin/backup
+COPY --chmod=0755 app/restore.sh    /usr/local/bin/restore
 
 VOLUME [ "/backups", "/config" ]
 

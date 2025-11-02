@@ -2,7 +2,7 @@
 set -eu
 
 # Simple logger with ISO timestamp
-log() { printf "%s %s\n" "$(date -Is)" "$*"; }
+log() { printf "%s %s\n" "$(date -Is)" "$*" ; }
 
 # Required
 
@@ -16,7 +16,14 @@ ONEFS="${BACKUP_ONEFS:-false}"
 CHOWN_TARGET="${BACKUP_CHOWN:-}"
 CHMOD_TARGET="${BACKUP_CHMOD:-}"
 
-# Deduct values
+# Deduct and sanitise values
+case "$CHOWN_TARGET" in
+  *[!A-Za-z0-9:._-]* ) log "WARN: ignoring unsafe BACKUP_CHOWN='$CHOWN_TARGET'"; CHOWN_TARGET="";;
+esac
+case "$CHMOD_TARGET" in
+  ""|[0-7][0-7][0-7]|[0-7][0-7][0-7][0-7]) : ;;
+  * ) log "WARN: ignoring unsafe BACKUP_CHMOD='$CHMOD_TARGET'"; CHMOD_TARGET="";;
+esac
 DATE="$(date +%Y%m%d)"
 TMPDIR="$(mktemp -d)"
 SRC_FILE="$TMPDIR/sources.txt"
@@ -71,15 +78,14 @@ case "$FORMAT" in
   *) log "ERROR: Unsupported BACKUP_FORMAT: $FORMAT"; exit 1 ;;
 esac
 
-OUT_BASENAME="${PREFIX}-${DATE}.${EXT}"
-OUT_PATH="${OUT_DIR}/${OUT_BASENAME}"
+OUT_PATH="${OUT_DIR}/${PREFIX}-${DATE}.${EXT}"
 
 log "Starting backup → ${OUT_PATH}"
 tar "$@" --file "$OUT_PATH"
 
 # Create checksum
-cd "$OUT_DIR" && sha256sum "$OUT_BASENAME" > "${OUT_BASENAME}.sha256"
-log "Checksum written: ${OUT_BASENAME}.sha256"
+sha256sum "$OUT_PATH" > "${OUT_PATH}.sha256"
+log "Checksum written: ${OUT_PATH}.sha256"
 
 # Apply ownership / permissions
 if [ -n "${CHOWN_TARGET}" ]; then

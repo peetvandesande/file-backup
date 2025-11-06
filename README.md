@@ -1,5 +1,13 @@
 # file-backup
 
+[![Docker Pulls](https://img.shields.io/docker/pulls/peetvandesande/file-backup)](https://hub.docker.com/r/peetvandesande/file-backup)
+[![Image Size](https://img.shields.io/docker/image-size/peetvandesande/file-backup/alpine)](https://hub.docker.com/r/peetvandesande/file-backup)
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
+[![Last Commit](https://img.shields.io/github/last-commit/peetvandesande/file-backup)](https://github.com/peetvandesande/file-backup/commits/main)
+[![GitHub Stars](https://img.shields.io/github/stars/peetvandesande/file-backup?style=flat)](https://github.com/peetvandesande/file-backup/stargazers)
+
+
+
 Minimal. Deterministic. Boring in the *good* way.
 
 `file-backup` is a dead-simple backup container that creates timestamped tar archives from one or more paths. It does **not** try to outsmart you. No pruning logic. No backup rotation policy. No orchestration opinion. It just *makes the backup you told it to make*—every time, identically.
@@ -19,8 +27,8 @@ If you want *one portable, predictable backup job in one container*—use this.
 ## How it Works (at a glance)
 
 ```
-backup.sh     → create timestamped archive from paths (relative, not absolute)
-restore.sh    → restore the newest matching archive (or a supplied one)
+backup.sh   → create timestamped archive from paths (relative, not absolute)
+restore.sh  → restore the newest matching archive (or a supplied one)
 entrypoint.sh → coordinates cron or one-shot backup workflows
 ```
 

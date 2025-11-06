@@ -85,6 +85,12 @@ docker run --rm \
 
 ---
 
+### Documentation
+
+- **Nextcloud Backup & Restore** → [`docs/nextcloud-backup-restore.md`](docs/nextcloud-backup-restore.md)
+
+---
+
 ## Philosophy
 
 > **Predictability > Cleverness**

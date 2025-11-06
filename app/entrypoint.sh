@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-# Ensure /usr/local/bin is on PATH so 'restore' works as a simple subcommand
+# Ensure /usr/local/bin is on PATH so 'backup' / 'restore' work as subcommands
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 log() { printf "%s %s\n" "$(date -Is)" "$*"; }

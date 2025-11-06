@@ -9,6 +9,7 @@ log() { printf "%s %s\n" "$(date -Is)" "$*" ; }
 # Optional
 DEST="${2:-/}"
 BACKUP_DIR="${BACKUPS_DIR:-/backups}"
+BACKUP_FILE="" # Declare variable globally
 VERIFY="${VERIFY_SHA256:-1}"   # 1 = verify if .sha256 exists; 0 = skip
 
 # Resolve backup file:
@@ -17,7 +18,10 @@ if [ -n "${1:-}" ]; then
   BACKUP_FILE="$1"
 else
   TODAY="$(date +%Y%m%d)"
-  BACKUP_FILE="$(ls -1 ${BACKUP_DIR}/${POSTGRES_DB}-*.sql.gz 2>/dev/null \
+  HN="$(hostname 2>/dev/null || echo container)"
+  HN="${HN%%.*}"
+  PREFIX="${BACKUP_NAME_PREFIX:-$HN}"
+  BACKUP_FILE="$(ls -1 ${BACKUP_DIR}/${PREFIX}-*.tar.gz 2>/dev/null \
     | sed -n 's#.*-\([0-9]\{8\}\)\.sql\.gz$#\1 \0#p' \
     | sort \
     | awk -v t="$TODAY" '$1 != t {print $2}' \

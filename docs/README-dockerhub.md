@@ -1,34 +1,42 @@
 # 🗂️ file-backup
 [![Docker Pulls](https://img.shields.io/docker/pulls/peetvandesande/file-backup.svg)](https://hub.docker.com/r/peetvandesande/file-backup)
 [![Image Size](https://img.shields.io/docker/image-size/peetvandesande/file-backup/alpine)](https://hub.docker.com/r/peetvandesande/file-backup)
-[![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue)](https://github.com/peetvandesande/file-backup/blob/main/LICENSE)
 
-Minimal, reliable backup container that creates timestamped tar archives of one or more paths.  
-No rotation policy, no backup server, no surprises — just **create backups** and **restore them**.
+Lightweight backup container that creates timestamped tar archives.
+
+No rotation, pruning, encryption, or cloud upload logic is included — **bring your own retention policy**.
 
 ---
 
 ## 🚀 Quick Usage
 
 ### One-off backup
+
 ```bash
 docker run --rm \
   -v /var/backups:/backups \
-  -v /var/www:/data:ro \
+  -v /var/www/html:/data:ro \
   -e BACKUP_NAME_PREFIX=web-data \
   -e BACKUP_PATHS="/data" \
   -e RUN_ONCE=1 \
   peetvandesande/file-backup:alpine
 ```
 
-### Scheduled backups (cron included)
+### Scheduled backup ( daily at 02:30 by default )
+
 ```bash
-docker run -d --name file-backup \
+docker run -d --name web-backup \
   -v /var/backups:/backups \
-  -v /var/www:/data:ro \
+  -v /var/www/html:/data:ro \
   -e BACKUP_NAME_PREFIX=web-data \
   -e BACKUP_PATHS="/data" \
   peetvandesande/file-backup:alpine
+```
+
+Override schedule:
+```bash
+-v ./crontab:/etc/crontabs/root:ro
 ```
 
 To run a backup before cron starts:
@@ -40,22 +48,25 @@ To run a backup before cron starts:
 
 ## 🧰 Restore
 
-### Restore the latest matching backup:
+Restore the **latest matching** archive:
+
 ```bash
 docker run --rm \
   -v /var/backups:/backups \
-  -v /var/www:/restore \
-  -e BACKUP_NAME_PREFIX=web-data \
+  -v /var/www/html:/restore \
   peetvandesande/file-backup:alpine restore /restore
 ```
 
-### Restore a specific archive:
+Restore a **specific** archive:
+
 ```bash
 docker run --rm \
   -v /var/backups:/backups \
-  -v /var/www:/restore \
-  peetvandesande/file-backup:alpine restore /backups/web-data-20250101.tar.gz /restore
+  -v /var/www/html:/restore \
+  peetvandesande/file-backup:alpine restore /backups/web-data-20251106.tar.gz /restore
 ```
+
+If you want predictable chmod/chown after extraction, restore into a fresh directory and then adjust ownership afterwards.
 
 ---
 
@@ -63,21 +74,37 @@ docker run --rm \
 
 | Variable | Default | Description |
 |---------|---------|-------------|
-| `BACKUP_NAME_PREFIX` | **required** | Prefix for archive names |
-| `BACKUP_PATHS` | **required** | Space-separated list of paths to archive |
-| `BACKUPS_DIR` | `/backups` | Output directory |
+| `BACKUP_NAME_PREFIX` | **required** | Prefix for archive filenames |
+| `BACKUP_PATHS` | **required** | Space-separated list of paths to include |
+| `BACKUPS_DIR` | `/backups` | Where archives are stored |
 | `COMPRESS` | `gz` | `gz`, `bz2`, `zst`, or `none` |
-| `COMPRESS_LEVEL` | *(auto)* | Compression level |
-| `VERIFY_SHA256` | `1` | Write `.sha256` checksum |
-| `PRESERVE_TIMES` | `1` | Keep mtimes (`1`) or normalize (`0`) |
-| `CHOWN_UID` + `CHOWN_GID` | *(unset)* | Apply ownership to created archives if set |
-| `CHMOD_MODE` | *(unset)* | Apply chmod if set |
-| `RUN_ONCE` | `0` | Run a single backup and exit |
-| `RUN_BACKUP_ON_START` | `0` | Run backup at container startup |
+| `COMPRESS_LEVEL` | *(auto)* | Optional compression level |
+| `VERIFY_SHA256` | `1` | `1` = write `.sha256` file |
+| `PRESERVE_TIMES` | `1` | `1` = keep mtimes, `0` = normalize |
+| `CHOWN_UID` | *(unset)* | Apply user ownership (if set) |
+| `CHOWN_GID` | *(unset)* | Apply group ownership (if set) |
+| `CHMOD_MODE` | *(unset)* | Apply mode to archive/sha file e.g. `0640` |
+| `EXCLUDE_PATTERNS` | *(unset)* | Space-separated patterns → `tar --exclude=` |
+| `RUN_ONCE` | `0` | Run backup once and exit |
+| `RUN_BACKUP_ON_START` | `0` | Run backup before cron starts |
+
+### Ownership Logic Example
+
+```bash
+# Force UID=33, keep existing GID:
+-e CHOWN_UID=33
+
+# Force GID=33, keep existing UID:
+-e CHOWN_GID=33
+
+# Force both explicitly:
+-e CHOWN_UID=33 -e CHOWN_GID=33
+```
 
 ---
 
-## 📦 Output Example
+## 📦 Output Format
+
 ```
 /backups/
 ├── web-data-20251106.tar.gz
@@ -86,17 +113,16 @@ docker run --rm \
 
 ---
 
-## 🗎 Documentation
-Full restore workflow (e.g., Nextcloud):
-→ https://github.com/peetvandesande/file-backup/tree/main/docs
-
----
-
 ## 🏷️ Tags
-| Tag | Base | Description |
-|-----|------|-------------|
-| `alpine` (default) | alpine:3 | Small + cron + backup/restore scripts |
+
+| Tag | Description |
+|-----|-------------|
+| `alpine` (default) | Smallest runtime image |
+| `dev` | Work-in-progress branch images |
+| `<version>` | Tagged stable releases |
 
 ---
 
-Maintained by **Peet van de Sande**
+Full docs and Nextcloud guide available here:  
+→ https://github.com/peetvandesande/file-backup/tree/main/docs/
+

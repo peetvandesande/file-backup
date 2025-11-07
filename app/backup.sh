@@ -1,12 +1,11 @@
 #!/bin/sh
 set -eu
 # ------------------------------------------------------------
-# file-backup :: backup.sh  (simplified flags)
+# file-backup :: backup.sh
 # - Creates a timestamped tar archive of one or more paths.
 # - Busybox/Alpine/GNU-tar friendly.
 # - Booleans are 1/0 (VERIFY_SHA256, PRESERVE_TIMES).
-# - Ownership/permissions are applied ONLY if CHOWN_UID/CHOWN_GID
-#   and/or CHMOD_MODE are provided (no extra DO_* flags).
+# - chown/chmod apply automatically if CHOWN_UID/GID or CHMOD_MODE are provided.
 # ------------------------------------------------------------
 # Env vars:
 #   BACKUP_NAME_PREFIX   (required)  e.g., "nextcloud-data"
@@ -16,7 +15,7 @@ set -eu
 #   COMPRESS_LEVEL       (optional) compression level:
 #                         - gz: use env GZIP=-<level>
 #                         - bz2: use env BZIP2=-<level>
-#                         - zst: pass -<level> to zstd
+#                         - zst: (best-effort; tar passthrough may vary)
 #   VERIFY_SHA256        (default=1)  1=write .sha256; 0=skip
 #   PRESERVE_TIMES       (default=1)  1=preserve mtimes; 0=normalize to now
 #   CHOWN_UID            (optional) numeric uid or name
@@ -92,6 +91,7 @@ case "$COMPRESS" in
     COMPRESS_ARGS="-j"
     ;;
   zst)
+    # Best-effort: rely on --use-compress-program=zstd (level passthrough depends on tar/zstd)
     COMPRESS_ARGS="--use-compress-program=zstd"
     # tar will invoke zstd; pass level via ZSTD_CLEVEL or inline argument
     if [ -n "$COMPRESS_LEVEL" ]; then
@@ -109,7 +109,7 @@ case "$COMPRESS" in
     ;;
 esac
 
-# Build the tar command args
+# Build tar command args
 set -- $TAR_BASE_OPTS $EXCLUDE_ARGS $COMPRESS_ARGS -f "$ARCHIVE"
 
 # Append -C <dir> . for directories, or -C <dir> <file> for single files
@@ -151,14 +151,22 @@ if [ "$VERIFY_SHA256" = "1" ]; then
   fi
 fi
 
-# ---- ownership / permissions (apply only if provided) -----------------------
-if [ -n "$CHOWN_UID" ] && [ -n "$CHOWN_GID" ]; then
-  chown "$CHOWN_UID:$CHOWN_GID" "$ARCHIVE" 2>/dev/null || true
-  [ -f "$SHA_FILE" ] && chown "$CHOWN_UID:$CHOWN_GID" "$SHA_FILE" 2>/dev/null || true
-  log "Set ownership to ${CHOWN_UID}:${CHOWN_GID}"
+# ---- ownership / permissions (auto-apply if values provided) ----------------
+# If only one of CHOWN_UID/CHOWN_GID is set, fill the other from current file metadata.
+if [ -n "${CHOWN_UID}" ] || [ -n "${CHOWN_GID}" ]; then
+  current_uid="$(stat -c %u "$ARCHIVE" 2>/dev/null || echo "")"
+  current_gid="$(stat -c %g "$ARCHIVE" 2>/dev/null || echo "")"
+  target_uid="${CHOWN_UID:-$current_uid}"
+  target_gid="${CHOWN_GID:-$current_gid}"
+  if [ -n "$target_uid" ] && [ -n "$target_gid" ]; then
+    chown "$target_uid:$target_gid" "$ARCHIVE" 2>/dev/null || true
+    [ -f "$SHA_FILE" ] && chown "$target_uid:$target_gid" "$SHA_FILE" 2>/dev/null || true
+    log "Set ownership to ${target_uid}:${target_gid}"
+  fi
 fi
 
-if [ -n "$CHMOD_MODE" ]; then
+# Apply chmod if provided
+if [ -n "${CHMOD_MODE}" ]; then
   chmod "$CHMOD_MODE" "$ARCHIVE" 2>/dev/null || true
   [ -f "$SHA_FILE" ] && chmod "$CHMOD_MODE" "$SHA_FILE" 2>/dev/null || true
   log "Set permissions to ${CHMOD_MODE}"

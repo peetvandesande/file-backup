@@ -6,22 +6,10 @@
 [![Last Commit](https://img.shields.io/github/last-commit/peetvandesande/file-backup)](https://github.com/peetvandesande/file-backup/commits/main)
 [![GitHub Stars](https://img.shields.io/github/stars/peetvandesande/file-backup?style=flat)](https://github.com/peetvandesande/file-backup/stargazers)
 
-
-
 Minimal. Deterministic. Boring in the *good* way.
 
-`file-backup` is a dead-simple backup container that creates timestamped tar archives from one or more paths. It does **not** try to outsmart you. No pruning logic. No backup rotation policy. No orchestration opinion. It just *makes the backup you told it to make*—every time, identically.
-
-This makes it ideal for:
-- Container volume backups
-- Pre-upgrade snapshots
-- CI artifact capture
-- Bare-metal config capture
-- Homelab sanity
-
-If you want Borg, Restic, Syncthing, or ZFS send/receive—use those.  
-If you want *one portable, predictable backup job in one container*—use this.
-
+`file-backup` is a dead-simple backup container that creates timestamped tar archives from one or more paths.
+No pruning. No cleverness. No surprises.
 ---
 
 ## How it Works (at a glance)
@@ -36,26 +24,23 @@ Everything is POSIX `sh`, Alpine-compatible, and inspectable. No Python, no Go b
 
 ---
 
-## Runtime Usage, Env Variables, and Examples
+## Documentation
 
-See the Docker Hub page (this is where the usage docs live):
-
-→ https://hub.docker.com/r/peetvandesande/file-backup
-
-This keeps the GitHub README focused on design and contribution rather than deployment examples.
+- **Nextcloud Backup & Restore Guide** → `docs/nextcloud-backup-restore.md`
+- **Full Disaster Recovery Guide** → `docs/full-disaster-recovery.md`
+- Runtime usage & environment reference: https://hub.docker.com/r/peetvandesande/file-backup
 
 ---
 
 ## Tag & Version Strategy
 
-| Branch | Image Tag(s) | Notes |
-|--------|-------------|-------|
-| `main` | `latest`, `<version>`, `<version>-alpine`, `<sha>` | Always stable |
-| `dev`  | `dev`, `dev-alpine`, `dev-<sha>` | Safe for testing / staging |
-| feature branches | `<branch>`, `<branch>-alpine`, `<branch>-<sha>` | Useful in real org workflows |
+| Branch        | Tags Published                                              |
+|---------------|------------------------------------------------------------|
+| `main`        | `latest`, `<version>`, `<version>-alpine`, `<sha>`         |
+| `dev`         | `dev`, `dev-alpine`, `dev-<sha>`                           |
+| Feature Branches | `<branch>`, `<branch>-alpine`, `<branch>-<sha>`        |
 
-You always know **exactly** what image you’re running.  
-Yes, this is intentional.
+You always know exactly what image you are running.
 
 ---
 
@@ -66,12 +51,12 @@ Clone and build:
 ```bash
 git clone https://github.com/peetvandesande/file-backup.git
 cd file-backup
-make print       # show tags and detected metadata
-make build       # local build
-make push        # push via buildx multiarch (if configured)
+make print       # Show build metadata and tags
+make build       # Build image locally
+make push        # Buildx multi-arch push
 ```
 
-Run test backup locally:
+Test backup locally:
 
 ```bash
 docker run --rm \
@@ -85,36 +70,18 @@ docker run --rm \
 
 ---
 
-### Documentation
-
-- **Nextcloud Backup & Restore** → [`docs/nextcloud-backup-restore.md`](docs/nextcloud-backup-restore.md)
-
----
-
 ## Philosophy
 
-> **Predictability > Cleverness**
+> Simplicity scales. Complexity fails.
 
-- Backups should be reproducible and explainable.
-- Restores should not require detective work.
-- Complexity belongs in retention/replication layers, not the backup job itself.
-
-You can chain this container with:
-- `rclone` → push backups to S3/Wasabi/B2
-- `restic` → dedupe + encryption + retention
-- `syncthing` → multi-node sync
-- `ssh` → ship artifacts off-host
-
-But this container itself stays **small, legible, and uninteresting**.  
-(That’s a compliment.)
+If you want encryption, deduplication, snapshot rotation or replication, layer those **on top**.  
+This container stays small, clear, and auditable.
 
 ---
 
 ## License
 
-**GPL-3.0**
-
-See `LICENSE` in this repository.
+GPL-3.0 — see `LICENSE`
 
 ---
 
@@ -122,5 +89,3 @@ See `LICENSE` in this repository.
 
 **Peet van de Sande**  
 https://github.com/peetvandesande
-
-Feel free to open PRs, file issues, or treat this like infrastructure legos.

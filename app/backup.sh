@@ -15,16 +15,17 @@ set -eu
 #   COMPRESS_LEVEL       (optional) compression level:
 #                         - gz: use env GZIP=-<level>
 #                         - bz2: use env BZIP2=-<level>
-#                         - zst: (best-effort; tar passthrough may vary)
-#   VERIFY_SHA256        (default=1)  1=write .sha256; 0=skip
-#   PRESERVE_TIMES       (default=1)  1=preserve mtimes; 0=normalize to now
-#   CHOWN_UID            (optional) numeric uid or name
-#   CHOWN_GID            (optional) numeric gid or name
-#   CHMOD_MODE           (optional) e.g., 0644
+#                         - zst: ZSTD_CLEVEL=<level> (best-effort)
+#   VERIFY_SHA256        (default=1) 1=write/verify .sha256; 0=skip
+#   PRESERVE_TIMES       (default=1) 1=preserve mtimes; 0=do not
+#   CHOWN_UID            (optional) chown archive owner uid
+#   CHOWN_GID            (optional) chown archive owner gid
+#   CHMOD_MODE           (optional) chmod mode, e.g. 0640
 #   EXCLUDE_PATTERNS     (optional) space-separated patterns (tar --exclude=PAT)
-#   DATE_FMT             (default=%Y%m%d) UTC timestamp in archive name
+#   DATE_FMT             (default=%Y%m%d) used in backup filename
 # ------------------------------------------------------------
 
+# Simple logger with ISO timestamp
 log() { printf "%s %s\n" "$(date -Is)" "$*"; }
 
 # ---- inputs / defaults ------------------------------------------------------
@@ -64,7 +65,7 @@ SHA_FILE="${ARCHIVE}.sha256"
 log "Starting backup → ${ARCHIVE}"
 
 # ---- tar options ------------------------------------------------------------
-# Use relative names by switching directories (-C) per path. Avoid absolute paths in archive.
+# Use tar with relative path names (no leading "/") to avoid absolute paths in the archive.
 if [ "$PRESERVE_TIMES" = "1" ]; then
   TAR_BASE_OPTS="-cp"     # create, preserve perms/times
 else
@@ -75,6 +76,10 @@ fi
 EXCLUDE_ARGS=""
 if [ -n "$EXCLUDE_PATTERNS" ]; then
   for pat in $EXCLUDE_PATTERNS; do
+    # Allow excludes to be specified as absolute ("/var/log") or relative ("var/log").
+    case "$pat" in
+      /*) pat="${pat#/}" ;;
+    esac
     EXCLUDE_ARGS="$EXCLUDE_ARGS --exclude=$pat"
   done
 fi
@@ -91,51 +96,78 @@ case "$COMPRESS" in
     COMPRESS_ARGS="-j"
     ;;
   zst)
-    # Best-effort: rely on --use-compress-program=zstd (level passthrough depends on tar/zstd)
-    COMPRESS_ARGS="--use-compress-program=zstd"
-    # tar will invoke zstd; pass level via ZSTD_CLEVEL or inline argument
-    if [ -n "$COMPRESS_LEVEL" ]; then
-      # Try inline -I if supported; otherwise rely on zstd default envs
-      # Busybox tar may not support -I, but --use-compress-program=zstd works and
-      # zstd reads -# from its args if tar passes them. We'll fall back to env.
-      ZSTD_ARG="-${COMPRESS_LEVEL}"
-      # We'll add ZSTD_ARG at the end when invoking tar (via ZSTD_ARGS variable).
-    else
-      ZSTD_ARG=""
-    fi
+    # For zstd we prefer to call tar without built-in compression and let
+    # ZSTD_CLEVEL adjust the zstd level when tar uses it via -I/--use-compress-program.
+    COMPRESS_ARGS=""
     ;;
   none)
     COMPRESS_ARGS=""
     ;;
 esac
 
-# Build tar command args
-set -- $TAR_BASE_OPTS $EXCLUDE_ARGS $COMPRESS_ARGS -f "$ARCHIVE"
+# ---- handle existing archive -----------------------------------------------
+if [ -e "$ARCHIVE" ]; then
+  log "WARNING: Archive already exists, overwriting: $ARCHIVE"
+  rm -f "$ARCHIVE"
+fi
 
-# Append -C <dir> . for directories, or -C <dir> <file> for single files
+# ---- Build tar command args -------------------------------------------------
+# We always back up from filesystem root (/) but store *relative* paths in the archive
+# (e.g. /etc → etc, /var/lib/mysql → var/lib/mysql). restore.sh then uses -C DEST
+# (default DEST=/) so restores go to the right place without absolute paths baked in.
+set -- $TAR_BASE_OPTS $EXCLUDE_ARGS $COMPRESS_ARGS -C / -f "$ARCHIVE"
+
+# Convert absolute source paths to relative paths under /
 for src in $PATHS; do
   if [ ! -e "$src" ]; then
     log "WARNING: source path does not exist, skipping: $src"
     continue
   fi
-  if [ -d "$src" ]; then
-    set -- "$@" -C "$src" .
-  else
-    d="$(dirname "$src")"
-    b="$(basename "$src")"
-    set -- "$@" -C "$d" "$b"
-  fi
+
+  case "$src" in
+    /*) rel="${src#/}" ;;  # strip leading "/"
+    *)
+      log "ERROR: BACKUP_PATHS must contain absolute paths, got: $src"
+      exit 1
+      ;;
+  esac
+
+  # Special case: backing up "/" itself → archive "."
+  [ -z "$rel" ] && rel="."
+
+  set -- "$@" "$rel"
 done
 
 # ---- run tar ----------------------------------------------------------------
 # shellcheck disable=SC2086
 if [ "$COMPRESS" = "zst" ] && [ -n "${ZSTD_ARG:-}" ]; then
-  # Inject level for zstd by setting ZSTD_CLEVEL if available is uncertain.
-  # Easiest: put ARG in ZSTD_CLEVEL env so zstd respects it.
-  ZSTD_CLEVEL="${COMPRESS_LEVEL}" tar "$@" -- ${ZSTD_ARG} >/dev/null 2>&1 || true
-  # Above line only tries to pass ZSTD_ARG; many tar builds ignore trailing args.
-  # So we run again without trailing args but with ZSTD_CLEVEL exported:
-  ZSTD_CLEVEL="${COMPRESS_LEVEL}" tar "$@" || { log "ERROR: tar failed"; exit 1; }
+  # Inject level for zstd by setting ZSTD_CLEVEL and using tar's zstd integration.
+  # Many tar builds support: tar -I 'zstd -T0', or --use-compress-program=zstd.
+  # We try a couple of common forms; if they fail, fall back to uncompressed tar.
+  if command -v zstd >/dev/null 2>&1; then
+    if tar --help 2>/dev/null | grep -q -- "--use-compress-program"; then
+      ZSTD_CLEVEL="${COMPRESS_LEVEL}" tar --use-compress-program=zstd "$@" || { log "ERROR: tar+zstd failed"; exit 1; }
+    elif tar --help 2>/dev/null | grep -q -- "-I"; then
+      ZSTD_CLEVEL="${COMPRESS_LEVEL}" tar -I zstd "$@" || { log "ERROR: tar -I zstd failed"; exit 1; }
+    else
+      # Fallback: let tar write to stdout and pipe to zstd
+      tmp="${ARCHIVE}.tmp"
+      rm -f "$tmp"
+      ZSTD_CLEVEL="${COMPRESS_LEVEL}" tar $TAR_BASE_OPTS $EXCLUDE_ARGS -f - $PATHS | zstd -o "$tmp"
+      mv "$tmp" "$ARCHIVE"
+    fi
+  else
+    log "WARNING: zstd not found; creating uncompressed tar instead."
+    tar $TAR_BASE_OPTS $EXCLUDE_ARGS -f "$ARCHIVE" $PATHS
+  fi
+elif [ "$COMPRESS" = "zst" ] && [ -z "${ZSTD_ARG:-}" ]; then
+  # If we don't have a specific level arg, still try zstd in a simple way
+  if command -v zstd >/dev/null 2>&1 && tar --help 2>/dev/null | grep -q -- "--use-compress-program"; then
+    ZSTD_CLEVEL="${COMPRESS_LEVEL}" tar --use-compress-program=zstd "$@" || { log "ERROR: tar+zstd failed"; exit 1; }
+  else
+    log "WARNING: zstd integration not available; creating uncompressed tar instead."
+    tar "$@" || { log "ERROR: tar failed"; exit 1; }
+  fi
 else
   tar "$@" || { log "ERROR: tar failed"; exit 1; }
 fi
@@ -144,20 +176,22 @@ log "Archive created: $ARCHIVE"
 
 # ---- checksum ---------------------------------------------------------------
 if [ "$VERIFY_SHA256" = "1" ]; then
-  if sha256sum "$ARCHIVE" > "$SHA_FILE"; then
-    log "Checksum written: $(basename "$SHA_FILE")"
-  else
-    log "WARNING: failed to write checksum for $ARCHIVE"
-  fi
+  log "Computing SHA-256 checksum..."
+  sha256sum "$ARCHIVE" > "$SHA_FILE"
+  log "Wrote checksum file: $SHA_FILE"
 fi
 
-# ---- ownership / permissions (auto-apply if values provided) ----------------
-# If only one of CHOWN_UID/CHOWN_GID is set, fill the other from current file metadata.
-if [ -n "${CHOWN_UID}" ] || [ -n "${CHOWN_GID}" ]; then
-  current_uid="$(stat -c %u "$ARCHIVE" 2>/dev/null || echo "")"
-  current_gid="$(stat -c %g "$ARCHIVE" 2>/dev/null || echo "")"
-  target_uid="${CHOWN_UID:-$current_uid}"
-  target_gid="${CHOWN_GID:-$current_gid}"
+# ---- post-processing: chown/chmod -------------------------------------------
+if [ -n "$CHOWN_UID" ] || [ -n "$CHOWN_GID" ]; then
+  target_uid="${CHOWN_UID:-}"
+  target_gid="${CHOWN_GID:-}"
+  # If only UID or only GID is provided, try to keep the other unchanged
+  if [ -z "$target_uid" ] && [ -n "$target_gid" ]; then
+    target_uid="$(id -u)"
+  elif [ -n "$target_uid" ] && [ -z "$target_gid" ]; then
+    target_gid="$(id -g)"
+  fi
+
   if [ -n "$target_uid" ] && [ -n "$target_gid" ]; then
     chown "$target_uid:$target_gid" "$ARCHIVE" 2>/dev/null || true
     [ -f "$SHA_FILE" ] && chown "$target_uid:$target_gid" "$SHA_FILE" 2>/dev/null || true

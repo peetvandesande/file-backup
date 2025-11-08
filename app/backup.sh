@@ -1,118 +1,209 @@
 #!/bin/sh
 set -eu
+# ------------------------------------------------------------
+# file-backup :: backup.sh
+# - Creates a timestamped tar archive of one or more paths.
+# - Busybox/Alpine/GNU-tar friendly.
+# - Booleans are 1/0 (VERIFY_SHA256, PRESERVE_TIMES).
+# - chown/chmod apply automatically if CHOWN_UID/GID or CHMOD_MODE are provided.
+# ------------------------------------------------------------
+# Env vars:
+#   BACKUP_NAME_PREFIX   (required)  e.g., "nextcloud-data"
+#   BACKUP_PATHS         (required)  space-separated absolute paths
+#   BACKUPS_DIR          (default=/backups)
+#   COMPRESS             (default=gz) one of: gz | bz2 | zst | none
+#   COMPRESS_LEVEL       (optional) compression level:
+#                         - gz: use env GZIP=-<level>
+#                         - bz2: use env BZIP2=-<level>
+#                         - zst: ZSTD_CLEVEL=<level> (best-effort)
+#   VERIFY_SHA256        (default=1) 1=write/verify .sha256; 0=skip
+#   PRESERVE_TIMES       (default=1) 1=preserve mtimes; 0=do not
+#   CHOWN_UID            (optional) chown archive owner uid
+#   CHOWN_GID            (optional) chown archive owner gid
+#   CHMOD_MODE           (optional) chmod mode, e.g. 0640
+#   EXCLUDE_PATTERNS     (optional) space-separated patterns (tar --exclude=PAT)
+#   DATE_FMT             (default=%Y%m%d) used in backup filename
+# ------------------------------------------------------------
 
 # Simple logger with ISO timestamp
-log() { printf "%s %s\n" "$(date -Is)" "$*" ; }
+log() { printf "%s %s\n" "$(date -Is)" "$*"; }
 
-# Trim leading/trailing single/double quotes
-_normalize() {
-  v="$1"
-  v="${v#\'}"; v="${v%\' }"; v="${v%\' }"; v="${v%\' }"
-  v="${v%\' }"; v="${v#\"}"; v="${v%\"}"
-  printf '%s' "$v"
-}
+# ---- inputs / defaults ------------------------------------------------------
+PREFIX="${BACKUP_NAME_PREFIX:-}"
+PATHS="${BACKUP_PATHS:-}"
+BACKUP_DIR="${BACKUPS_DIR:-/backups}"
 
-# Required
+COMPRESS="${COMPRESS:-gz}"                 # gz | bz2 | zst | none
+COMPRESS_LEVEL="${COMPRESS_LEVEL:-}"       # optional
+VERIFY_SHA256="${VERIFY_SHA256:-1}"        # 1/0
+PRESERVE_TIMES="${PRESERVE_TIMES:-1}"      # 1/0
 
-# Optional
-OUT_DIR="${BACKUP_DEST:-/backups}"
-FORMAT="${BACKUP_FORMAT:-tar.gz}"
-HN="$(hostname 2>/dev/null || echo container)"
-HN="${HN%%.*}"
-PREFIX="${BACKUP_NAME_PREFIX:-$HN}"
-ONEFS="${BACKUP_ONEFS:-false}"
-CHOWN_TARGET="${BACKUP_CHOWN:-}"
-CHMOD_TARGET="${BACKUP_CHMOD:-}"
+CHOWN_UID="${CHOWN_UID:-}"
+CHOWN_GID="${CHOWN_GID:-}"
+CHMOD_MODE="${CHMOD_MODE:-}"
 
-# Deduct and sanitise values
-CHOWN_TARGET="$(_normalize "$CHOWN_TARGET")"
-CHMOD_TARGET="$(_normalize "$CHMOD_TARGET")"
-case "$CHOWN_TARGET" in
-  *[!A-Za-z0-9:._-]* ) log "WARN: ignoring unsafe BACKUP_CHOWN='$CHOWN_TARGET'"; CHOWN_TARGET="";;
+EXCLUDE_PATTERNS="${EXCLUDE_PATTERNS:-}"
+DATE_FMT="${DATE_FMT:-%Y%m%d}"
+
+# ---- validate ---------------------------------------------------------------
+[ -n "$PREFIX" ] || { log "ERROR: BACKUP_NAME_PREFIX is required"; exit 1; }
+[ -n "$PATHS" ]  || { log "ERROR: BACKUP_PATHS is required (space-separated absolute paths)"; exit 1; }
+[ -d "$BACKUP_DIR" ] || mkdir -p "$BACKUP_DIR"
+
+# ---- name -------------------------------------------------------------------
+TS="$(date -u +"$DATE_FMT")"
+case "$COMPRESS" in
+  gz)   EXT=".tar.gz"  ;;
+  bz2)  EXT=".tar.bz2" ;;
+  zst)  EXT=".tar.zst" ;;
+  none) EXT=".tar"     ;;
+  *)    log "ERROR: Invalid COMPRESS='$COMPRESS' (use gz|bz2|zst|none)"; exit 1 ;;
 esac
-case "$CHMOD_TARGET" in
-  ""|[0-7][0-7][0-7]|[0-7][0-7][0-7][0-7]) : ;;
-  * ) log "WARN: ignoring unsafe BACKUP_CHMOD='$CHMOD_TARGET'"; CHMOD_TARGET="";;
-esac
-DATE="$(date +%Y%m%d)"
-TMPDIR="$(mktemp -d)"
-SRC_FILE="$TMPDIR/sources.txt"
-EXC_FILE="$TMPDIR/excludes.txt"
-trap 'rm -rf "$TMPDIR"' EXIT
+ARCHIVE="${BACKUP_DIR%/}/${PREFIX}-${TS}${EXT}"
+SHA_FILE="${ARCHIVE}.sha256"
 
-# Sources
-if [ -f /config/sources.txt ]; then
-  cp /config/sources.txt "$SRC_FILE"
-elif [ -n "${BACKUP_SOURCES:-}" ]; then
-  printf "%s" "$BACKUP_SOURCES" | tr ',' '\n' > "$SRC_FILE"
+log "Starting backup → ${ARCHIVE}"
+
+# ---- tar options ------------------------------------------------------------
+# Use tar with relative path names (no leading "/") to avoid absolute paths in the archive.
+if [ "$PRESERVE_TIMES" = "1" ]; then
+  TAR_BASE_OPTS="-cp"     # create, preserve perms/times
 else
-  log "ERROR: No sources defined. Provide /config/sources.txt or BACKUP_SOURCES."
-  exit 1
+  TAR_BASE_OPTS="-cpm"    # -m: don't preserve mtimes
 fi
 
-# Excludes
-if [ -f /config/excludes.txt ]; then
-  cp /config/excludes.txt "$EXC_FILE"
-elif [ -n "${BACKUP_EXCLUDES:-}" ]; then
-  printf "%s" "$BACKUP_EXCLUDES" | tr ',' '\n' > "$EXC_FILE"
-else
-  : > "$EXC_FILE"
+# Build exclude args
+EXCLUDE_ARGS=""
+if [ -n "$EXCLUDE_PATTERNS" ]; then
+  for pat in $EXCLUDE_PATTERNS; do
+    # Allow excludes to be specified as absolute ("/var/log") or relative ("var/log").
+    case "$pat" in
+      /*) pat="${pat#/}" ;;
+    esac
+    EXCLUDE_ARGS="$EXCLUDE_ARGS --exclude=$pat"
+  done
 fi
 
-# Clean up comments / blanks / CRLFs
-sed -i -e 's/\r$//' -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$SRC_FILE" || true
-sed -i -e 's/\r$//' -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$EXC_FILE" || true
-
-# Build tar arguments
-set -- \
-  --create \
-  --absolute-names \
-  --xattrs --xattrs-include='*' \
-  --acls \
-  --numeric-owner \
-  --warning=no-file-changed
-
-if [ "$ONEFS" = "true" ]; then
-  set -- "$@" --one-file-system
-fi
-
-# Exclude must come before file list
-set -- "$@" --exclude-from="$EXC_FILE" --files-from="$SRC_FILE"
-
-EXT="tar"
-case "$FORMAT" in
-  tar.gz)  EXT="tar.gz";  set -- "$@" --gzip ;;
-  tar.zst) EXT="tar.zst"; set -- "$@" --use-compress-program=zstd ;;
-  tar.bz2) EXT="tar.bz2"; set -- "$@" --bzip2 ;;
-  tar)     EXT="tar" ;;
-  *) log "ERROR: Unsupported BACKUP_FORMAT: $FORMAT"; exit 1 ;;
+# Prepare compression selection and optional levels
+# For gz/bz2, honor COMPRESS_LEVEL via the standard env vars if present.
+case "$COMPRESS" in
+  gz)
+    [ -n "$COMPRESS_LEVEL" ] && export GZIP="-${COMPRESS_LEVEL}"
+    COMPRESS_ARGS="-z"
+    ;;
+  bz2)
+    [ -n "$COMPRESS_LEVEL" ] && export BZIP2="-${COMPRESS_LEVEL}"
+    COMPRESS_ARGS="-j"
+    ;;
+  zst)
+    # For zstd we prefer to call tar without built-in compression and let
+    # ZSTD_CLEVEL adjust the zstd level when tar uses it via -I/--use-compress-program.
+    COMPRESS_ARGS=""
+    ;;
+  none)
+    COMPRESS_ARGS=""
+    ;;
 esac
 
-OUT_PATH="${OUT_DIR}/${PREFIX}-${DATE}.${EXT}"
+# ---- handle existing archive -----------------------------------------------
+if [ -e "$ARCHIVE" ]; then
+  log "WARNING: Archive already exists, overwriting: $ARCHIVE"
+  rm -f "$ARCHIVE"
+fi
 
-log "Starting backup → ${OUT_PATH}"
-tar "$@" --file "$OUT_PATH"
+# ---- Build tar command args -------------------------------------------------
+# We always back up from filesystem root (/) but store *relative* paths in the archive
+# (e.g. /etc → etc, /var/lib/mysql → var/lib/mysql). restore.sh then uses -C DEST
+# (default DEST=/) so restores go to the right place without absolute paths baked in.
+set -- $TAR_BASE_OPTS $EXCLUDE_ARGS $COMPRESS_ARGS -C / -f "$ARCHIVE"
 
-# Create checksum
-sha256sum "$OUT_PATH" > "${OUT_PATH}.sha256"
-log "Checksum written: ${OUT_PATH}.sha256"
+# Convert absolute source paths to relative paths under /
+for src in $PATHS; do
+  if [ ! -e "$src" ]; then
+    log "WARNING: source path does not exist, skipping: $src"
+    continue
+  fi
 
-# Apply ownership / permissions
-if [ -n "${CHOWN_TARGET}" ]; then
-  if chown -h "${CHOWN_TARGET}" "${OUT_PATH}" "${OUT_PATH}.sha256" 2>/dev/null; then
-    log "Set ownership to ${CHOWN_TARGET}"
+  case "$src" in
+    /*) rel="${src#/}" ;;  # strip leading "/"
+    *)
+      log "ERROR: BACKUP_PATHS must contain absolute paths, got: $src"
+      exit 1
+      ;;
+  esac
+
+  # Special case: backing up "/" itself → archive "."
+  [ -z "$rel" ] && rel="."
+
+  set -- "$@" "$rel"
+done
+
+# ---- run tar ----------------------------------------------------------------
+# shellcheck disable=SC2086
+if [ "$COMPRESS" = "zst" ] && [ -n "${ZSTD_ARG:-}" ]; then
+  # Inject level for zstd by setting ZSTD_CLEVEL and using tar's zstd integration.
+  # Many tar builds support: tar -I 'zstd -T0', or --use-compress-program=zstd.
+  # We try a couple of common forms; if they fail, fall back to uncompressed tar.
+  if command -v zstd >/dev/null 2>&1; then
+    if tar --help 2>/dev/null | grep -q -- "--use-compress-program"; then
+      ZSTD_CLEVEL="${COMPRESS_LEVEL}" tar --use-compress-program=zstd "$@" || { log "ERROR: tar+zstd failed"; exit 1; }
+    elif tar --help 2>/dev/null | grep -q -- "-I"; then
+      ZSTD_CLEVEL="${COMPRESS_LEVEL}" tar -I zstd "$@" || { log "ERROR: tar -I zstd failed"; exit 1; }
+    else
+      # Fallback: let tar write to stdout and pipe to zstd
+      tmp="${ARCHIVE}.tmp"
+      rm -f "$tmp"
+      ZSTD_CLEVEL="${COMPRESS_LEVEL}" tar $TAR_BASE_OPTS $EXCLUDE_ARGS -f - $PATHS | zstd -o "$tmp"
+      mv "$tmp" "$ARCHIVE"
+    fi
   else
-    log "WARNING: Failed to set ownership to ${CHOWN_TARGET}"
+    log "WARNING: zstd not found; creating uncompressed tar instead."
+    tar $TAR_BASE_OPTS $EXCLUDE_ARGS -f "$ARCHIVE" $PATHS
+  fi
+elif [ "$COMPRESS" = "zst" ] && [ -z "${ZSTD_ARG:-}" ]; then
+  # If we don't have a specific level arg, still try zstd in a simple way
+  if command -v zstd >/dev/null 2>&1 && tar --help 2>/dev/null | grep -q -- "--use-compress-program"; then
+    ZSTD_CLEVEL="${COMPRESS_LEVEL}" tar --use-compress-program=zstd "$@" || { log "ERROR: tar+zstd failed"; exit 1; }
+  else
+    log "WARNING: zstd integration not available; creating uncompressed tar instead."
+    tar "$@" || { log "ERROR: tar failed"; exit 1; }
+  fi
+else
+  tar "$@" || { log "ERROR: tar failed"; exit 1; }
+fi
+
+log "Archive created: $ARCHIVE"
+
+# ---- checksum ---------------------------------------------------------------
+if [ "$VERIFY_SHA256" = "1" ]; then
+  log "Computing SHA-256 checksum..."
+  sha256sum "$ARCHIVE" > "$SHA_FILE"
+  log "Wrote checksum file: $SHA_FILE"
+fi
+
+# ---- post-processing: chown/chmod -------------------------------------------
+if [ -n "$CHOWN_UID" ] || [ -n "$CHOWN_GID" ]; then
+  target_uid="${CHOWN_UID:-}"
+  target_gid="${CHOWN_GID:-}"
+  # If only UID or only GID is provided, try to keep the other unchanged
+  if [ -z "$target_uid" ] && [ -n "$target_gid" ]; then
+    target_uid="$(id -u)"
+  elif [ -n "$target_uid" ] && [ -z "$target_gid" ]; then
+    target_gid="$(id -g)"
+  fi
+
+  if [ -n "$target_uid" ] && [ -n "$target_gid" ]; then
+    chown "$target_uid:$target_gid" "$ARCHIVE" 2>/dev/null || true
+    [ -f "$SHA_FILE" ] && chown "$target_uid:$target_gid" "$SHA_FILE" 2>/dev/null || true
+    log "Set ownership to ${target_uid}:${target_gid}"
   fi
 fi
 
-if [ -n "${CHMOD_TARGET}" ]; then
-  if chmod "${CHMOD_TARGET}" "${OUT_PATH}" "${OUT_PATH}.sha256" 2>/dev/null; then
-    log "Set permissions to ${CHMOD_TARGET}"
-  else
-    log "WARNING: Failed to set permissions to ${CHMOD_TARGET}"
-  fi
+# Apply chmod if provided
+if [ -n "${CHMOD_MODE}" ]; then
+  chmod "$CHMOD_MODE" "$ARCHIVE" 2>/dev/null || true
+  [ -f "$SHA_FILE" ] && chmod "$CHMOD_MODE" "$SHA_FILE" 2>/dev/null || true
+  log "Set permissions to ${CHMOD_MODE}"
 fi
 
-SIZE="$(du -h "$OUT_PATH" | awk '{print $1}')"
-log "Backup complete (${SIZE})"
+log "Backup completed successfully."

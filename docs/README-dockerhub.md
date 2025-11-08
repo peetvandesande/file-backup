@@ -91,14 +91,14 @@ If you want predictable chmod/chown after extraction, restore into a fresh direc
 ### Ownership Logic Example
 
 ```bash
-# Force UID=33, keep existing GID:
--e CHOWN_UID=33
+# Force UID=34, keep existing GID:
+-e CHOWN_UID=34
 
-# Force GID=33, keep existing UID:
--e CHOWN_GID=33
+# Force GID=34, keep existing UID:
+-e CHOWN_GID=34
 
 # Force both explicitly:
--e CHOWN_UID=33 -e CHOWN_GID=33
+-e CHOWN_UID=34 -e CHOWN_GID=34
 ```
 
 ---
@@ -120,6 +120,39 @@ If you want predictable chmod/chown after extraction, restore into a fresh direc
 | `alpine` (default) | Smallest runtime image |
 | `dev` | Work-in-progress branch images |
 | `<version>` | Tagged stable releases |
+
+---
+
+## 🐳 Docker Compose Example
+
+```yaml
+services:
+  web:
+    image: "httpd"
+    volumes:
+      - www-data:/var/www
+
+  web-backup:
+    image: peetvandesande/file-backup
+    environment:
+      - BACKUP_NAME_PREFIX=web-data
+      - BACKUP_PATHS="/var/www/html"
+      - COMPRESS=bz2
+      - CHOWN_UID=34
+      - CHOWN_GID=34
+      - CHMOD_MODE=0640
+    volumes:
+      - www-data:/var/www:ro
+      - /var/backups:/backups
+
+volumes:
+  www-data: {}    
+    
+```
+
+This setup runs a Apache HTTPD container and a backup container side by side,  
+with backups stored under `./backups` on the host.
+
 
 ---
 

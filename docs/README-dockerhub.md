@@ -1,6 +1,7 @@
 # 🗂️ file-backup
 [![Docker Pulls](https://img.shields.io/docker/pulls/peetvandesande/file-backup.svg)](https://hub.docker.com/r/peetvandesande/file-backup)
 [![Image Size](https://img.shields.io/docker/image-size/peetvandesande/file-backup/alpine)](https://hub.docker.com/r/peetvandesande/file-backup)
+[![GitHub](https://img.shields.io/badge/source-github-blue)](https://github.com/peetvandesande/file-backup)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](https://github.com/peetvandesande/file-backup/blob/main/LICENSE)
 
 Lightweight backup container that creates timestamped tar archives.

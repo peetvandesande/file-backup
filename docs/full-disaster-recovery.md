@@ -1,6 +1,6 @@
 # Full Disaster Recovery Guide
 
-This guide provides a **complete restore workflow** for rebuilding a Nextcloud deployment using the backups created by `file-backup`.
+This guide provides a **complete restore workflow** for rebuilding a Nextcloud deployment using the backups created by `file-backup` and `pg-backup`.
 
 This applies to:
 - Host failure recovery
@@ -16,6 +16,7 @@ This applies to:
 | Nextcloud data+config backup | `nextcloud-data-YYYYMMDD.tar.gz` |
 | Database dump | `nextcloud-db-YYYYMMDD.sql` |
 | Original compose file | `docker-compose.yml` (matching Nextcloud version recommended) |
+| Environment file | `db.env` (with current POSTGRESS_PASSWORD) |
 
 Place them together, e.g.:
 
@@ -24,6 +25,8 @@ Place them together, e.g.:
   docker-compose.yml
   nextcloud-data-20251106.tar.gz
   nextcloud-db-20251106.sql
+  db.env
+  
 ```
 
 ---
@@ -49,18 +52,18 @@ docker run --rm \
   -v nextcloud-data:/var/www/html/data \
   -v nextcloud-config:/var/www/html/config \
   -e BACKUP_NAME_PREFIX=nextcloud-data \
-  peetvandesande/file-backup:alpine restore /
+  peetvandesande/file-backup:alpine restore
 ```
 
 To restore a **specific** file instead of latest:
 
 ```bash
-peetvandesande/file-backup:alpine restore /backups/nextcloud-data-20251106.tar.gz /
+peetvandesande/file-backup:alpine restore /backups/nextcloud-data-20251106.tar.gz
 ```
 
 ---
 
-## 4) Restore Database (PostgreSQL Example)
+## 4) Restore Database (pg-backup Example)
 
 Start DB only:
 
@@ -72,7 +75,12 @@ sleep 4
 Restore:
 
 ```bash
-cat nextcloud-db-20251106.sql | docker exec -i nextcloud-db psql -U nextcloud
+docker run --rm \
+  -v $PWD:/backups \
+  -e BACKUP_NAME_PREFIX=nextcloud-db \
+  --env-file db.env \
+  --network nextcloud_default \
+  peetvandesande/pg-backup:alpine restore /backups/nextcloud-db-20251106.sql
 ```
 
 ---

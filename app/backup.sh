@@ -47,6 +47,16 @@ DATE_FMT="${DATE_FMT:-%Y%m%d}"
 
 # ---- validate ---------------------------------------------------------------
 [ -n "$PREFIX" ] || { log "ERROR: BACKUP_NAME_PREFIX is required"; exit 1; }
+
+# Strip optional surrounding double quotes, e.g. when BACKUP_PATHS is defined as
+# BACKUP_PATHS="/var/www/html /etc/nginx/nginx.conf /usr/local/etc/php/php.ini"
+case "$PATHS" in
+  \"*\" )
+    PATHS=${PATHS#\"}   # remove leading "
+    PATHS=${PATHS%\"}   # remove trailing "
+    ;;
+esac
+
 [ -n "$PATHS" ]  || { log "ERROR: BACKUP_PATHS is required (space-separated absolute paths)"; exit 1; }
 [ -d "$BACKUP_DIR" ] || mkdir -p "$BACKUP_DIR"
 
@@ -146,11 +156,14 @@ if [ "$COMPRESS" = "zst" ] && [ -n "${ZSTD_ARG:-}" ]; then
   # We try a couple of common forms; if they fail, fall back to uncompressed tar.
   if command -v zstd >/dev/null 2>&1; then
     if tar --help 2>/dev/null | grep -q -- "--use-compress-program"; then
+      log "INFO: zstd option 1"
       ZSTD_CLEVEL="${COMPRESS_LEVEL}" tar --use-compress-program=zstd "$@" || { log "ERROR: tar+zstd failed"; exit 1; }
     elif tar --help 2>/dev/null | grep -q -- "-I"; then
+      log "INFO: zstd option 2"
       ZSTD_CLEVEL="${COMPRESS_LEVEL}" tar -I zstd "$@" || { log "ERROR: tar -I zstd failed"; exit 1; }
     else
       # Fallback: let tar write to stdout and pipe to zstd
+      log "INFO: zstd option 3"
       tmp="${ARCHIVE}.tmp"
       rm -f "$tmp"
       ZSTD_CLEVEL="${COMPRESS_LEVEL}" tar $TAR_BASE_OPTS $EXCLUDE_ARGS -f - $PATHS | zstd -o "$tmp"

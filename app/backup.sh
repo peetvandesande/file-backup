@@ -108,7 +108,7 @@ case "$COMPRESS" in
   zst)
     # For zstd we prefer to call tar without built-in compression and let
     # ZSTD_CLEVEL adjust the zstd level when tar uses it via -I/--use-compress-program.
-    COMPRESS_ARGS=""
+    COMPRESS_ARGS="--zstd"
     ;;
   none)
     COMPRESS_ARGS=""
@@ -150,7 +150,7 @@ done
 
 # ---- run tar ----------------------------------------------------------------
 # shellcheck disable=SC2086
-if [ "$COMPRESS" = "zst" ] && [ -n "${ZSTD_ARG:-}" ]; then
+if [ "$COMPRESS" = "zst" ] && [ -n "${ZSTD_ARG:-best-effort}" ]; then
   # Inject level for zstd by setting ZSTD_CLEVEL and using tar's zstd integration.
   # Many tar builds support: tar -I 'zstd -T0', or --use-compress-program=zstd.
   # We try a couple of common forms; if they fail, fall back to uncompressed tar.
@@ -176,6 +176,7 @@ if [ "$COMPRESS" = "zst" ] && [ -n "${ZSTD_ARG:-}" ]; then
 elif [ "$COMPRESS" = "zst" ] && [ -z "${ZSTD_ARG:-}" ]; then
   # If we don't have a specific level arg, still try zstd in a simple way
   if command -v zstd >/dev/null 2>&1 && tar --help 2>/dev/null | grep -q -- "--use-compress-program"; then
+    log "INFO: zstd option 4"
     ZSTD_CLEVEL="${COMPRESS_LEVEL}" tar --use-compress-program=zstd "$@" || { log "ERROR: tar+zstd failed"; exit 1; }
   else
     log "WARNING: zstd integration not available; creating uncompressed tar instead."

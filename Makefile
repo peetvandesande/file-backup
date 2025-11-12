@@ -1,6 +1,5 @@
 # =====================[ Release / Versioning ]=====================
 # Required per-repo var:
-#   REPO ?= peetvandesande/file-backup   # or peetvandesande/pg-backup
 REPO ?= peetvandesande/file-backup
 
 PLAT_BUILD             ?= linux/amd64
@@ -19,7 +18,7 @@ TAG_VARIANT    := -$(VARIANT)
 IMAGE_TITLE            ?= file-backup
 IMAGE_DESCRIPTION      ?= "Simple backup/restore utility (Alpine)"
 IMAGE_SOURCE_URL       ?= $(shell git remote get-url origin | sed 's/^git@/https:\/\//; s/\.git$$//; s/:/\//')
-IMAGE_REPO_URL         ?= https://hub.docker.com/r/$(REPO):$(VARIANT)
+IMAGE_REPO_URL         ?= https://hub.docker.com/r/$(REPO)
 IMAGE_AUTHORS          ?= "Peet van de Sande <peet@peetvandesande.com>"
 
 # Derived metadata
